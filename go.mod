@@ -5,6 +5,7 @@ go 1.24.2
 require github.com/gdamore/tcell v1.4.0
 
 require (
+	github.com/creack/pty v1.1.24 // direct
 	github.com/gdamore/encoding v1.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.0.3 // indirect
 	github.com/mattn/go-runewidth v0.0.7 // indirect

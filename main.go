@@ -7,52 +7,106 @@ import (
 	"syscall"
 
 	"github.com/gdamore/tcell"
+
+	"goplex/pane"
 )
 
+var curX, curY int
+
 func main() {
-	screen, err := tcell.NewScreen()
+	scr, err := tcell.NewScreen()
 	if err != nil {
-		log.Fatalf("failed to create screen: %v", err)
+		log.Fatalf("new screen: %v", err)
 	}
-	if err := screen.Init(); err != nil {
-		log.Fatalf("failed to initialise screen: %v", err)
+	if err := scr.Init(); err != nil {
+		log.Fatalf("screen init: %v", err)
 	}
-	defer screen.Fini()
+	defer scr.Fini()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		screen.Fini()
+		scr.Fini()
 		os.Exit(0)
 	}()
 
-	drawSplash(screen)
+	p, err := pane.NewPane(os.Getenv("SHELL"))
+	if err != nil {
+		log.Fatalf("pane: %v", err)
+	}
+	defer p.Close()
+
+	go func() {
+		for data := range p.Out {
+			drawBytes(scr, data)
+		}
+	}()
+
+	scr.Clear()
+	scr.Show()
 
 	for {
-		ev := screen.PollEvent()
+		ev := scr.PollEvent()
 		switch e := ev.(type) {
+		case *tcell.EventResize:
+			scr.Sync()
 		case *tcell.EventKey:
 			if e.Key() == tcell.KeyCtrlC {
 				return
 			}
-		case *tcell.EventResize:
-			screen.Sync()
-			drawSplash(screen)
+			if r := e.Rune(); r != 0 {
+				_ = p.WriteRune(r)
+			} else {
+				switch e.Key() {
+				case tcell.KeyEnter:
+					_ = p.WriteRune('\n')
+				case tcell.KeyBackspace, tcell.KeyBackspace2:
+					_ = p.WriteRune('\b')
+				case tcell.KeyTab:
+					_ = p.WriteRune('\t')
+				}
+			}
 		}
 	}
 }
 
-func drawSplash(s tcell.Screen) {
-	s.Clear()
+func drawBytes(scr tcell.Screen, data []byte) {
+	w, h := scr.Size()
 
-	msg := "goplex — press Ctrl‑C to quit"
-	w, h := s.Size()
-	x := (w - len(msg)) / 2
-	y := h / 2
+	for _, b := range data {
+		if b == '\n' {
+			curX = 0
+			curY++
+			if curY >= h {
+				scrollUp(scr, w, h)
+				curY = h - 1
+			}
+			continue
+		}
 
-	for i, r := range msg {
-		s.SetContent(x+i, y, r, nil, tcell.StyleDefault)
+		scr.SetContent(curX, curY, rune(b), nil, tcell.StyleDefault)
+		curX++
+		if curX >= w {
+			curX = 0
+			curY++
+			if curY >= h {
+				scrollUp(scr, w, h)
+				curY = h - 1
+			}
+		}
 	}
-	s.Show()
+	scr.Show()
+}
+
+func scrollUp(scr tcell.Screen, w, h int) {
+	for row := 1; row < h; row++ {
+		for col := 0; col < w; col++ {
+			mainc, comb, style, _ := scr.GetContent(col, row)
+			scr.SetContent(col, row-1, mainc, comb, style)
+		}
+	}
+	for col := 0; col < w; col++ {
+		scr.SetContent(col, h-1, ' ', nil, tcell.StyleDefault)
+	}
 }
